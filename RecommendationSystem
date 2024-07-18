@@ -1,0 +1,372 @@
+---
+title: "Kaggle 1"
+author: "Jacob Bedi, Nate Miller"
+date: "2023-09-25"
+output:
+  pdf_document: default
+  html_document: default
+---
+# Model
+## Hyperparameters:
+### - distance: Bray_Curtis
+### - weight: Distance
+### - normalization: Log_Transform (55th percentile)
+### - k: 20
+
+## Tools used
+### It is important to note that we utilized AI tools such as ChatGPT and Github Copilot. While we quickly discovered these tools made mistakes and their code required refinement, they definitely pointed us in the right direction. ChatGPT was able to explain concepts that we needed to understand and suggest hyperparameters that were not obvious to us. We made sure to understand the code that was generated.
+
+## Loading data
+```{r }
+library(knitr)
+
+test_data <- as.matrix(read.csv("/Users/natemiller/projects/CIS678/CIS678-kaggle-1/data/test_set.csv", row.names = 1))
+training_data <- as.matrix(read.csv("/Users/natemiller/projects/CIS678/CIS678-kaggle-1/data/training_set.csv", row.names = 1))
+```
+
+## Normalization
+### Preprocessing the data was quickly discovered to be an important step. We chose KNN as our main approach which relies on calculating distances to find the most relevant data. Due to how much data is processed in the training model a consistent scale is needed to get accurate recommendations. We tried several different normalization techniques. Min-max scaling was an effective method that simply transformed values so they fall between 0 and 1. However, a log normalization approach turned out to be the most effective, particularly: output=log(1 + x/max). The max in our algorithm represents the value at a specified percentile rather than the absolute maximum. The best performing percentile was around the 55th percentile. We believe this is due to the presence of many outliers in the training data, perhaps due to researchers forgetting to record species or high variance in the ecosystem.
+```{r, results='hide'}
+normalization <- function(x, percentile = 55) {
+  robust_max <- quantile(x, probs = percentile / 100)
+  # Handle case where robust_max is zero to avoid division by zero
+  if (robust_max == 0) robust_max <- 1
+  scaled_x <- x / robust_max
+  return(log1p(scaled_x))
+}
+```
+
+```{r, results='hide'}
+training_data <- normalization(training_data)
+test_data <- normalization(test_data)
+```
+
+## Weighting
+### Several weighting strategies were attempted including weighting non-0s higher than 0s. The most effective was a simple weighting based on distance. This resulted in closer neighbors having a greater influence on the recommendations.
+```{r, results='hide'}
+weight_function <- function(x) {
+  return(1 / x)
+}
+```
+
+## Distance Calculation
+### We tried out all the distance calculations we learned about in class. The most effective of those being Cosine. This is like due to it’s natural ability to resist the influence of outliers. However, we discovered another method called Bray-Curtis dissimilarity that slightly edged out Cosine distance. Interestingly, this method was originally used to quantify the dissimilarity between the presence of species at two different sites (similar to the problem we are solving for).
+```{r, results='hide'}
+distance_method <- function(a, b) {
+  sum(abs(a - b)) / sum(a + b)
+}
+```
+
+## Model Selection
+### We chose K Nearest Neighbors (KNN) partly due to it’s simplicity and relative ease of tuning hyperparameters. We expected there to be many outliers and asymmetry due to the nature of recording observations in a complex ecosystem.
+```{r, results='hide'}
+knn <- function(a, x, k) {
+  # Vectorized computation of distances
+  distances <- apply(a, 2, function(y) distance_method(x, y))
+
+  # Identify the top-k columns with smallest distances
+  nearest_indices <- order(distances)[1:k]
+  nearest_values <- a[, nearest_indices, drop = FALSE]
+
+  # Compute the weights for the top-k nearest distances
+  weights <- weight_function(distances[nearest_indices])
+  # Compute the weighted sum for the top-k neighbors
+  training_nn <- rowSums(nearest_values * weights)
+  # Don't recommend any values which are non-zero in the test sample
+  training_nn[which(x != 0)] <- 0
+  # Create binary recommendations based on top values
+  recommendations <- rep(0, length(x))
+  recommendations[order(training_nn, decreasing = TRUE)[1:5]] <- 1
+
+  return(recommendations)
+}
+```
+
+```{r, results='hide'}
+recommendations <- pbapply::pbapply(test_data, 2, function(x) knn(training_data, x, 20))
+
+table(colSums(recommendations != 0))
+
+table(recommendations)
+
+rownames(recommendations) <- rownames(test_data)
+submission <- reshape2::melt(recommendations)
+head(submission)
+
+sample_submission <- read.csv("/Users/natemiller/projects/CIS678/CIS678-kaggle-1/data/sample_submission.csv", row.names = 1)
+submission_ids <- read.csv("/Users/natemiller/projects/CIS678/CIS678-kaggle-1/data/submission_ids.csv", row.names = 1)
+head(sample_submission)
+head(submission_ids)
+
+#We can verify that our results line up with `submission_ids`:
+all.equal(submission_ids$row_name, as.character(submission$Var1))
+all.equal(submission_ids$col_name, as.character(submission$Var2))
+
+sample_submission$Expected <- submission$value
+
+file_path <- "/Users/natemiller/projects/CIS678/CIS678-kaggle-1/data/kaggle_1_submission.csv"
+# May need adjustment to get proper row column. On my mac needed to set row.names = TRUE and manually add "Id" column header.
+write.csv(sample_submission, file = file_path, row.names = TRUE)
+```
+
+# Cross Validation
+## Hyperparameters:
+### distance: Jaccard, Cosine, Minkowski, Manhattan, Bray_Curtis
+### weight: No operation, Uniform, Distance, Exponential
+### normalization: Min_Max, Log_Transform (90th percentile), Log_Transform (75th percentile), Log_Transform (55th percentile), Log_Transform (25th percentile)
+### k: 5, 10, 20, 25, 30, 35, 50, 100
+
+## Hyperparameter tuning
+### We mostly relied on a cross validation approach to tune our hyperparameters. We divided the training data into 5 folds using 1 fold as our test data. We randomly set 5 0s in each column of the test data and after the predictions were generated we were able to calculate the accuracy. Lists of all the parameter values were created and put into a grid. Using grid search we were able to perform KNN on all combinations of parameters we were interested in. Then using the ggplot2 library we were able plot the accuracy results against our parameters.
+
+## Libraries load for plotting and knit
+```{r}
+library(ggplot2)
+library(knitr)
+# Global cache options
+opts_chunk$set(cache = TRUE,tidy.opts=list(width.cutoff=50),tidy=TRUE)
+```
+
+## Truncated training data to speed up cross validation at the expense of model power. Works with all data just takes very long.
+```{r, results='hide'}
+training_data <- as.matrix(read.csv("~/Downloads/cis678-challenge-1-recommendation/training_set.csv", row.names = 1))[, 1:300]
+```
+
+## Creating our normalization functions
+```{r, results='hide'}
+min_max_normalize <- function(data) {
+  min_val <- min(data)
+  max_val <- max(data)
+  return((data - min_val) / (max_val - min_val))
+}
+
+log_transform <- function(x, percentile) {
+  robust_max <- quantile(x, probs = percentile / 100)
+  # Handle case where robust_max is zero to avoid division by zero
+  if (robust_max == 0) robust_max <- 1
+  scaled_x <- x / robust_max
+  return(log1p(scaled_x))
+}
+
+log_transform_90 <- function(x, percentile = 90) {
+  log_transform(x, percentile)
+}
+
+log_transform_75 <- function(x, percentile = 25) {
+  log_transform(x, percentile)
+}
+
+log_transform_55 <- function(x, percentile = 55) {
+  log_transform(x, percentile)
+}
+
+log_transform_25 <- function(x, percentile = 25) {
+  log_transform(x, percentile)
+}
+
+normalization_methods <- list(
+  Min_Max = min_max_normalize,
+  log_transform_90 = log_transform_90,
+  log_transform_75 = log_transform_75,
+  log_transform_55 = log_transform_55,
+  log_Transform_25 = log_transform_25
+)
+
+```
+
+## Creating and defining our distance functions
+```{r,results='hide'}
+jaccard_distance <- function(x, y) {
+  sum(x * y) / (sum(x^2) + sum(y^2) - sum(x * y))
+}
+
+cosine_distance <- function(x, y) {
+  1 - (sum(x * y) / (sqrt(sum(x^2)) * sqrt(sum(y^2))))
+}
+
+minkowski_distance <- function(x, y, p = 2) {
+  abs_diff <- abs(x - y)
+  sum(abs_diff^p)^(1 / p)
+}
+
+manhattan_distance <- function(a, b) {
+  sum(abs(a - b))
+}
+
+bray_curtis_dissimilarity <- function(a, b) {
+  sum(abs(a - b)) / sum(a + b)
+}
+
+# Create distance method list
+distance_methods <- list(
+  Jaccard = jaccard_distance,
+  Cosine = cosine_distance,
+  Minkowski = minkowski_distance,
+  Manhattan = manhattan_distance,
+  Bray_Curtis = bray_curtis_dissimilarity
+)
+```
+
+## Creating and defining our weight functions
+```{r,results='hide'}
+# Creating our  weight functions
+noop <- function(x) {
+  return(x)
+}
+
+uniform <- function(x) {
+  return(rep(1, length(x)))
+}
+
+distance <- function(x) {
+  return(1 / x)
+}
+
+exponential <- function(x) {
+  lambda <- 1
+  return(exp(-x / lambda))
+}
+
+weight_methods <- list(
+  Noop = noop,
+  Uniform = uniform,
+  Distance = distance,
+  Exponential = exponential
+)
+```
+
+## Recommendation creation with KNN function
+```{r,results='hide'}
+#recommendation creation with KNN function
+knn <- function(a, x, distance_method, weight_method, k) {
+  # Vectorized computation of distances
+  distances <- apply(a, 2, function(y) distance_method(x, y))
+  # Identify the top-k columns with smallest distances
+  nearest_indices <- order(distances)[1:k]
+  nearest_values <- a[, nearest_indices, drop = FALSE]
+  # Compute the weights for the top-k nearest distances
+  weights <- weight_method(distances[nearest_indices])
+  # Check and prevent division by zero
+  weights[weights == 0] <- 1e-10
+  # Compute the weighted sum for the top-k neighbors
+  training_nn <- rowSums(nearest_values * weights)
+  # Don't recommend any values which are non-zero in the test sample
+  training_nn[which(x != 0)] <- 0
+  # Create binary recommendations based on top values
+  recommendations <- rep(0, length(x))
+  recommendations[order(training_nn, decreasing = TRUE)[1:5]] <- 1
+  return(recommendations)
+}
+```
+
+
+```{r,results='hide'}
+# Cross-validation function
+five_fold_cross_validation <- function(mat, distance_function, weight_function, normalization_method, k, n_folds = 5) {
+  # Split columns into 5 groups
+  n_cols <- ncol(mat)
+  group_size <- ceiling(n_cols / n_folds)
+  column_groups <- split(seq_len(n_cols), ceiling(seq_len(n_cols) / group_size))
+  accuracy_list <- numeric(n_folds)
+
+  for (i in seq_along(column_groups)) {
+    training_indices <- unlist(column_groups[-i])
+    test_indices <- column_groups[[i]]
+    fold_training_data <- mat[, training_indices, drop = FALSE]
+    # Test data remains unchanged
+    test_data <- mat[, test_indices, drop = FALSE]
+
+    # Normalize training data
+    fold_training_data <- normalization_method(fold_training_data)
+    test_data <- normalization_method(test_data)
+
+    # Randomly set 5 rows in each test column to zero
+    substituted_rows <- sapply(seq_len(ncol(test_data)), function(col) {
+      non_zero_rows <- which(test_data[, col] != 0)  # Find non-zero rows for the current column
+      sample(non_zero_rows, min(5, length(non_zero_rows)))  # Sample from the non-zero rows
+    })
+
+    for (j in seq_len(ncol(test_data))) {
+      test_data[substituted_rows[, j], j] <- 0
+    }
+
+    # KNN predictions
+    predictions <- apply(test_data, 2, function(column) {
+      knn(fold_training_data, column, distance_function, weight_function, k)
+    })
+
+    total_errors <- 0
+
+    # Loop over each test column
+    for (j in seq_len(ncol(test_data))) {
+      # Identify the top 5 recommendations for the current test column
+      top_5_recommendations <- order(predictions[, j], decreasing = TRUE)[1:5]
+      correct_recommendations <- length(intersect(substituted_rows[, j], top_5_recommendations))
+      incorrect_recommendations <- 5 - correct_recommendations
+      # 2 errors for each incorrect recommendation: false positive / false negative
+      total_errors <- total_errors + (2 * incorrect_recommendations)
+    }
+    # 85 species
+    mae <- total_errors / (85 * ncol(test_data))
+    # Useful for seeing the progress of the cross-validation
+    # print(mae)
+    # print("-----")
+
+    accuracy_list[i] <- mae
+  }
+
+  return(mean(accuracy_list))
+}
+```
+
+## Combinations of hyperparameters
+```{r, results='hide'}
+# Combine all the different methods
+combinations <- expand.grid(
+  distance = names(distance_methods),
+  weight = names(weight_methods),
+  normalization = names(normalization_methods),
+  k = c(5, 10, 20, 25, 30, 35, 50, 100)
+)
+# Create a list of all possible combinations of hyperparameters. Using the expand.grid function to generate these combinations. Iterate through each combination of hyperparameters. For each combination, call the five_fold_cross_validation function with the specified hyperparameters and training data. Record and store the MAE for each combination. Compare the performance metrics across different combinations to identify the best-performing combination.
+```
+
+## Run cross validation
+```{r, results='hide'}
+# Reporting
+results <- apply(combinations, 1, function(params) {
+  distance_function <- distance_methods[[params["distance"]]]
+  weight_function <- weight_methods[[params["weight"]]]
+  normalization_function <- normalization_methods[[params["normalization"]]]
+  k_value <- params["k"]
+
+  five_fold_cross_validation(training_data, distance_function, weight_function, normalization_function, k_value)
+})
+
+df_results <- data.frame(
+  distance = rep(combinations$distance, times = length(results) / nrow(combinations)),
+  weight = rep(combinations$weight, times = length(results) / nrow(combinations)),
+  normalization = rep(combinations$normalization, times = length(results) / nrow(combinations)),
+  k = rep(combinations$k, times = length(results) / nrow(combinations)),
+  accuracy = results
+)
+```
+
+## Plot cross validation results
+### Currently plotting all hyperparemeters. Typically we ran with fewer combinations for readability.
+```{r}
+# Plot accuracy across different k-values and n_factors for each combination of distance
+graphs <- ggplot(df_results, aes(x = k, y = accuracy, color = as.factor(normalization), shape = weight)) +
+  geom_line(aes(group = interaction(weight, normalization))) +
+  geom_point() +
+  facet_wrap(~ distance, scales = "free") +
+  labs(title = "Accuracy across different distance methods, weight methods, normalization methods, and k-values",
+       x = "k-value", y = "Accuracy", color = "Normalization", shape = "Weight") +
+  theme_minimal()
+
+print(graphs)
+```
+
+
+## Conclusion
+### Overall we believe we were able to construct an effective model. It required a lot of research into various methods related to KNN. While we are happy with the results there are certainly things we can do to improve the model and cross validation. Top of the list is creating a more efficient KNN algorithm. While it can produce a submission result in a matter of minutes the runtime added up exponentially when cross validating. We either had to truncate the training data or be willing to wait a while for it to run. There are likely more nuanced distance, weight and normalization methods that could help us control for outliers and reduce noise. Additionally, there were some strategies we did not get great results with including matrix decomposition and PCA. However, we believe with more time they had the potential to be effective with the right distance/normalization strategies.
