@@ -1,6 +1,6 @@
 ---
 title: "Kaggle 1"
-author: "Jacob Bedi, Nate Miller"
+author: "Jacob Bedi
 date: "2023-09-25"
 output:
   pdf_document: default
@@ -20,8 +20,8 @@ output:
 ```{r }
 library(knitr)
 
-test_data <- as.matrix(read.csv("/Users/natemiller/projects/CIS678/CIS678-kaggle-1/data/test_set.csv", row.names = 1))
-training_data <- as.matrix(read.csv("/Users/natemiller/projects/CIS678/CIS678-kaggle-1/data/training_set.csv", row.names = 1))
+test_data <- as.matrix(read.csv("/Users/JakeBedi/projects/CIS678/CIS678-kaggle-1/data/test_set.csv", row.names = 1))
+training_data <- as.matrix(read.csv("/Users/JakeBedi/projects/CIS678/CIS678-kaggle-1/data/training_set.csv", row.names = 1))
 ```
 
 ## Normalization
