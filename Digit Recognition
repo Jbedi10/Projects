@@ -1,0 +1,271 @@
+---
+title: "Kaggle Challenge 3"
+author: "Jacob Bedi"
+output: html_document
+date: "2023-11-20"
+---
+
+##### This is my model from a keras standpoint. My Naive implementation can be found below. I worked not directly with Nick Scholl, but he review my initial Keras attempt and pointed me in the direction of an online kera tutorial that uses the MNIST dataset: https://appsilon.com/r-keras-mnist/ - I did my best to explain what was happening in each code chunk the author wrote. Where I was running into issues was getting the model to take the test data you had supplied. Otherwise this is a pretty direct implementation from the website listed above. For my naive implementation I did use chat GPT as I was running into some matrix multiplication issues, but quickly figured out that I wasn't normalizing the data and was able to fix it rather easily. 
+
+
+```{r}
+library(tensorflow)
+library(keras)
+```
+
+###### This code loads the MNIST dataset using the dataset_mnist() function. x_train and x_test are the training and testing input data (images), respectively. y_train and y_test are the corresponding labels (digits) for training and testing
+```{r}
+# Load the MNIST dataset
+mnist <- dataset_mnist()
+x_train <- mnist$train$x
+y_train <- mnist$train$y
+x_test <- mnist$test$x
+y_test <- mnist$test$y
+```
+
+###### Reshapes the input data (x_train and x_test) from a 3D array (images) to a 2D array with 784 columns (28x28 image pixels). Normalizes the pixel values to be in the range [0, 1] by dividing by 255. to_categorical Converts the categorical labels (y_train and y_test) into one-hot encoded format. The num_classes = 10 parameter indicates that there are 10 classes (digits 0 through 9).
+
+```{r}
+x_train <- array_reshape(x_train, c(nrow(x_train), 784))
+x_train <- x_train / 255
+
+x_test <- array_reshape(x_test, c(nrow(x_test), 784))
+x_test <- x_test / 255
+
+y_train <- to_categorical(y_train, num_classes = 10)
+y_test <- to_categorical(y_test, num_classes = 10)
+```
+
+###### Constructs a sequential model using Keras.Adds dense (fully connected) layers with ReLU activation functions.
+Introduces dropout layers to prevent overfitting. The model is designed for classifying 10 different digits. The summary function prints a summary of the model architecture
+
+layer_dense is used to add a fully connected (dense) layer to the neural network.
+In the context of a neural network, a dense layer implies that each neuron in the layer is connected to every neuron in the previous layer. 
+
+units: The number of neurons or nodes in the layer.
+activation: The activation function applied to the output of the layer. In this case, it's set to "relu," which stands for Rectified Linear Unit, a popular activation function.
+input_shape: For the first layer in the network, it specifies the shape of the input data.
+layer_dropout:
+
+layer_dropout is used to add a dropout layer to the neural network.
+Dropout is a regularization technique that helps prevent overfitting by randomly setting a fraction of input units to zero during training. This prevents the network from relying too much on specific neurons and promotes a more robust model.
+Parameters:
+rate: The fraction of input units to drop during training. In this case, it's set to 0.25, meaning 25% of the input units will be randomly set to zero at each update during training.
+```{r}
+# Build the CNN model
+model <- keras_model_sequential() %>%
+  layer_dense(units = 256, activation = "relu", input_shape = c(784)) %>%
+  layer_dropout(rate = 0.25) %>% 
+  layer_dense(units = 128, activation = "relu") %>%
+  layer_dropout(rate = 0.25) %>% 
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dropout(rate = 0.25) %>%
+  layer_dense(units = 10, activation = "softmax")
+summary(model)
+```
+
+
+##### Configures the model for training.Specifies the loss function (categorical_crossentropy for multi-class classification). I chose the Adam optimizer and accuracy as the evaluation metric.
+```{r}
+# Compile the model
+model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = optimizer_adam(),
+  metrics = c('accuracy')
+)
+```
+
+##### Fits (trains) the model on the training data (x_train and y_train). Runs for 50 epochs with a batch size of 128.
+Uses 15% of the training data for validation. The training history is stored in the history variable, which can be used to analyze the model's performance over epochs.
+
+```{r}
+history <- model %>% 
+  fit(x_train, y_train, epochs = 50, batch_size = 128, validation_split = 0.15)
+```
+
+
+```{r}
+library(readr)
+mnist_test <- read_csv("CIS678/mnist_test.csv")
+mnist_test <- t(mnist_test)
+mnist_test <- mnist_test / 255
+```
+
+```{r}
+predictions <- model %>%
+  predict(mnist_test) %>%
+  k_argmax()
+
+predictions$numpy()
+submission <- as.matrix(predictions)
+```
+
+```{r}
+# Create a submission dataframe
+submission <- data.frame(Id = 1:10000, Expected = submission)
+
+# Save the submission file
+write.csv(submission, "Kaggle3.submission.csv", row.names = FALSE)
+```
+
+
+---
+title: "Kaggle3 Naive"
+output: html_document
+date: "2023-11-20"
+---
+```{r}
+# Load the data
+x <- as.matrix(read.csv("~/CIS678/mnist_train.csv"))
+y <- as.vector(read.csv("~/CIS678/mnist_train_targets.csv")$x)
+x_test <-as.matrix(read.csv("~/CIS678/mnist_test.csv"))
+```
+
+```{r}
+x <- apply(x, 2, function(y) y / 255)
+x_test <- apply(x_test, 2, function(y) y / 255)
+```
+
+```{r}
+idx <- sample(1:ncol(x), 10000)
+x <- x[, idx]
+y <- y[idx]
+```
+
+```{r}
+relu<-function(x){
+  x[x < 0] <- 0
+  x
+}
+relu_prime <-function(x) {
+  x[x <= 0] <- 0
+  x[x > 0] <- 1
+  x
+}
+softmax <- function(x) {
+  exp_x <- exp(x - max(x))  # for numerical stability
+  return(exp_x / rowSums(exp_x))
+}
+softmax_prime <- function(x) {
+  p <- softmax(x)
+  return(p * (1 - p))
+}
+```
+
+##### These lines define a function named multilayer_perceptron that takes input data x, target labels y, number of training epochs, learning rate (lr), and the number of neurons in each hidden layer (h1, h2, h3, h4) as parameters.
+
+##### We initialize the weights (w1, w2, w3, w4, w5) and biases (b1, b2, b3, b4, b5) for each layer of the neural network using Glorot initialization for weight matrices and normal distribution for biases.
+
+##### Next we initiate a loop over the specified number of training epochs, and within each epoch, there is an inner loop iterating over each training example (i) in the dataset.
+
+##### Then perform forward propagation through the neural network, computing the output (a5) for each input example. Each layer uses a rectified linear unit (ReLU) activation function, except for the output layer, which uses softmax activation.
+
+##### Then after forward propagation we compute the error between the predicted output (a5) and the actual target label (y). Then, it performs backpropagation to update the weights and biases by computing deltas for each layer.
+
+
+##### And lastly update the weights and biases using the computed deltas and the learning rate. The code also calculates and prints the classification accuracy for each epoch. And set the weights to the new weights after backpropagation has completed. 
+
+##### My thought process was to add 2 more layers to your naive implementation and add a softmax outer layer, rather than your initial sigmoid layer. I am not sure what I missed - but the accuracy was extremely dissapointing.
+
+```{r}
+multilayer_perceptron <- function(x, y, epochs, lr, h1, h2, h3, h4) {
+  # weight and bias initialization (Glorot initialization)
+  w1 <- matrix(runif(nrow(x) * h1, min = -sqrt(6 / (nrow(x) + h1)), max = sqrt(6 / (nrow(x) + h1))), nrow(x), h1)
+  b1 <- rnorm(h1, sd = 0.1)
+  w2 <- matrix(runif(h1 * h2, min = -sqrt(6 / (h1 + h2)), max = sqrt(6 / (h1 + h2))), h1, h2)
+  b2 <- rnorm(h2, sd = 0.1)
+  w3 <- matrix(runif(h2 * h3, min = -sqrt(6 / (h2 + h3)), max = sqrt(6 / (h2 + h3))), h2, h3)
+  b3 <- rnorm(h3, sd = 0.1)
+  w4 <- matrix(runif(h3 * h4, min = -sqrt(6 / (h3 + h4)), max = sqrt(6 / (h3 + h4))), h3, h4)
+  b4 <- rnorm(h4, sd = 0.1)
+  w5 <- matrix(runif(h4 * 1, min = -sqrt(6 / (h4 + 1)), max = sqrt(6 / (h4 + 1))), h4, 1)
+  b5 <- rnorm(1, sd = 0.1)
+  for (epoch in 1:epochs) {
+    total_error <- 0
+    for (i in 1:ncol(x)) {
+      # forward propagation
+      z1 <- x[, i] %*% w1 + b1
+      a1 <- relu(z1)
+      z2 <- a1 %*% w2 + b2
+      a2 <- relu(z2)
+      z3 <- a2 %*% w3 + b3
+      a3 <- relu(z3)
+      z4 <- a3 %*% w4 + b4
+      a4 <- relu(z4)
+      z5 <- a4 %*% w5 + b5
+      a5 <- softmax(z5)
+      # backpropagation
+      error <- y[[i]] - a5
+      total_error <- total_error + abs(round(error))
+      a5_delta <- error * softmax_prime(a5)
+      a4_delta <- (a5_delta %*% t(w5)) * relu_prime(a4)
+      a3_delta <- (a4_delta %*% t(w4)) * relu_prime(a3)
+      a2_delta <- (a3_delta %*% t(w3)) * relu_prime(a2)
+      a1_delta <- (a2_delta %*% t(w2)) * relu_prime(a1)
+      # update weights and biases
+      w5 <- w5 + lr * t(a4) %*% a5_delta
+      b5 <- b5 + lr * a5_delta
+      w4 <- w4 + lr * t(a3) %*% a4_delta
+      b4 <- b4 + lr * a4_delta
+      w3 <- w3 + lr * t(a2) %*% a3_delta
+      b3 <- b3 + lr * a3_delta
+      w2 <- w2 + lr * t(a1) %*% a2_delta
+      b2 <- b2 + lr * a2_delta
+      w1 <- w1 + lr * x[, i] %*% a1_delta
+      b1 <- b1 + lr * a1_delta
+    }
+    accuracy <- round((1 - total_error / ncol(x)) * 100, 2)
+    cat(paste0("epoch: ", epoch, ", classification accuracy: ", accuracy, "%\n"))
+  }
+  list(w1 = w1, b1 = b1, w2 = w2, b2 = b2, w3 = w3, b3 = b3, w4 = w4, b4 = b4, w5 = w5, b5 = b5)
+}
+```
+```{r}
+# Train models with softmax activation
+set.seed(123)
+models <- lapply(0:9, function(digit){
+  multilayer_perceptron(x, as.numeric(y == digit), h1 = 64, h2 = 32, h3 = 16, h4 = 8, lr = 0.001, epochs = 10)
+})
+```
+
+```{r}
+# Make predictions using softmax models
+predict_softmax_mlp <- function(models, x_test) {
+  pred <- matrix(0, length(models), ncol(x_test))
+  for (i in 1:ncol(x_test)) {
+    for (j in 1:10) {
+      z1 <- x_test[, i] %*% models[[j]]$w1 + models[[j]]$b1
+      a1 <- relu(z1)
+      z2 <- a1 %*% models[[j]]$w2 + models[[j]]$b2
+      a2 <- relu(z2)
+      z3 <- a2 %*% models[[j]]$w3 + models[[j]]$b3
+      pred[j, i] <- softmax(z3)
+    }
+  }
+  pred
+}
+
+```
+
+```{r}
+# Make predictions for the test set
+pred_test_softmax <- apply(predict_softmax_mlp(softmax_models, x_test), 2, function(y) which.max(y) - 1)
+pred_train_softmax <- apply(predict_softmax_mlp(softmax_models, x), 2, function(y) which.max(y) - 1)
+# Accuracy of training set predictions
+accuracy_train_softmax <- sum(pred_train_softmax == y) / length(pred_train_softmax)
+cat(paste("Accuracy on the training set:", round(accuracy_train_softmax * 100, 2), "%\n"))
+```
+
+```{r}
+submission <- data.frame(Id = 1:10000, Expected = submission)
+
+# Save the submission file
+write.csv(submission, "Kaggle3.submission.csv", row.names = FALSE)
+```
+```
+
+```{}
+
+
+```
+
