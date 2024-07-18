@@ -1,0 +1,74 @@
+---
+title: "Kaggle Challenge 2"
+author: "Jacob Bedi, Nate Miller"
+date: "2023-10-03"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+library(glmnet)
+#Conversion to Matrices:These datasets are converted into matrices using the as.matrix() function, resulting in three matrices: adt, rna, and test.
+adt_set <- read.csv("~/Desktop/CIS_678/training_set_adt.csv", row.names=1)
+rna_set <- read.csv("~/Desktop/CIS_678/training_set_rna.csv", row.names=1)
+test_set <- read.csv("~/Desktop/CIS_678/test_set_rna.csv", row.names = 1)
+adt <- as.matrix(adt_set)
+rna <- as.matrix(rna_set)
+test <- as.matrix(test_set)
+
+```
+
+
+```{r}
+library(base)
+library(Matrix)
+library(glmnet)
+
+set.seed(1500)
+#write a function for calculating predictions
+#implemented a ridge regression algorithm - Ridge Regression introduces a penalty for having large coefficients. It's like telling the model, "Try to fit the data, but also keep the coefficients as small as possible."
+#The function returns the predicted values (predictions) for the test_rna based on the linear relationship learned from train_rna and train_adt.
+make_predictions <- function(train_rna, train_adt, test_rna, lambda) {
+  ATA <- tcrossprod(train_rna)
+  n <- nrow(train_rna) #calculate the number of rows in the training dataset
+  ATy <- tcrossprod(train_rna, train_adt)
+  X <- solve(ATA + lambda * diag(n), ATy) #lambda is used for regularization and prevention of overfitting
+  predictions <- crossprod(X, test_rna) #calculate the predictions
+  return(predictions)
+}
+
+#write a function for formatting the predictions into kaggle submission
+format_predictions <- function(y_pred) {
+  # Format the output as a data frame and save to a CSV file
+  predicted <- as.data.frame(y_pred)
+  y_pred_long <- reshape2::melt(predicted)
+  y_pred_long$ID <- 1:nrow(y_pred_long)
+  y_pred_long$ID <- paste0("ID_", y_pred_long$ID)
+  final_predicted <- y_pred_long[, c("ID", "value")]
+  names(final_predicted) <- c("ID", "EXPECTED")
+  write.csv(final_predicted, "my_submission.csv", row.names = FALSE)
+}
+#get the predictions
+y_pred = make_predictions(rna, adt, test, 900)  #900 was the best regularization parameter that resulted in the highest score
+#write the predictions to csv file
+format_predictions(y_pred)
+```
+
+
+```{r}
+sample_submission <- reshape2::melt(y_pred)
+head(sample_submission)
+```
+
+```{r}
+sample_submission <- data.frame(
+  "ID" = paste0("ID_", 1:nrow(sample_submission)), 
+  "Expected" = sample_submission$value)
+head(sample_submission)
+```
+
+```{r}
+file_path <- "~/Desktop/CIS_678/JakeBedi_submission6K2.csv"
+write.csv(sample_submission, file=file_path, row.names = FALSE)
+```
